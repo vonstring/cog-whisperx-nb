@@ -14,8 +14,10 @@ class Predictor(BasePredictor):
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
         self.device = "cuda"
-        self.model = whisperx.load_model("large-v2", self.device, language="en", compute_type=compute_type)
-        self.alignment_model, self.metadata = whisperx.load_align_model(language_code="en", device=self.device)
+        self.model = whisperx.load_model("NbAiLabBeta/nb-whisper-large", self.device, compute_type=compute_type)
+        self.alignment_model = None
+        self.metadata = None
+        self.alignment_language = None
 
     def predict(
         self,
@@ -23,14 +25,19 @@ class Predictor(BasePredictor):
         batch_size: int = Input(description="Parallelization of input audio transcription", default=32),
         align_output: bool = Input(description="Use if you need word-level timing and not just batched transcription", default=False),
         only_text: bool = Input(description="Set if you only want to return text; otherwise, segment metadata will be returned as well.", default=False),
+        language: str = Input(description="Language code for the audio file", default="en"),
         debug: bool = Input(description="Print out memory usage information.", default=False)
     ) -> str:
         """Run a single prediction on the model"""
         with torch.inference_mode():
-            result = self.model.transcribe(str(audio), batch_size=batch_size) 
+            result = self.model.transcribe(str(audio), batch_size=batch_size, language=language)
             # result is dict w/keys ['segments', 'language']
             # segments is a list of dicts,each dict has {'text': <text>, 'start': <start_time_msec>, 'end': <end_time_msec> }
             if align_output:
+                if self.alignment_language != result['language']:
+                    self.alignment_language = result['language']
+                    self.alignment_model, self.metadata = whisperx.load_alignment_model(language_code=result['language'], device=self.device)
+
                 # NOTE - the "only_text" flag makes no sense with this flag, but we'll do it anyway
                 result = whisperx.align(result['segments'], self.alignment_model, self.metadata, str(audio), self.device, return_char_alignments=False)
                 # dict w/keys ['segments', 'word_segments']
